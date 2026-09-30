@@ -1,0 +1,23 @@
+# Generated build outputs
+/build/
+/OutlookWebFit.apk
+/OutlookWebFit.apk.idsig
+/.release-notes*.md
+
+# Downloaded SDK and dependencies
+/toolchain/
+
+# Signing material
+/*.keystore
+/*.jks
+/*.p12
+
+# Local screenshots can contain private mailbox data
+/outlook-web-fit-check*.png
+
+# Editor and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
