@@ -38,6 +38,8 @@ Download `OutlookWebFit.apk` from the [latest GitHub release](../../releases/lat
 
 The APK requires Android 6.0 (API 23) or newer. Separate sessions rely on Android System WebView's multi-profile support; keep System WebView updated for the best results.
 
+The Android package name is `com.desudesu.outlookwebfit`. Releases before v2.2.0 used `com.local.outlookwebfit`; Android treats the new identifier as a separate app, so sessions from older installations do not migrate automatically.
+
 Release checksums are included in the release notes. Upgrades must be signed with the same certificate, so APKs built with another keystore may require uninstalling the existing app first.
 
 ## How it works
@@ -74,7 +76,7 @@ sh build.sh
 ```text
 AndroidManifest.xml                            App permissions and metadata
 res/drawable/ic_launcher.xml                   Vector launcher icon
-src/com/local/outlookwebfit/MainActivity.java  Browser UI and behavior
+src/com/desudesu/outlookwebfit/MainActivity.java  Browser UI and behavior
 src/androidx/.../PackageInfoCompat.java        Small AndroidX compatibility shim
 setup-toolchain.sh                             Prepares the shared SDK if needed
 build.sh                                       Compiles, packages, and signs the APK

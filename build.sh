@@ -28,15 +28,15 @@ aapt2 link \
   --manifest "$ROOT/AndroidManifest.xml" \
   --min-sdk-version 23 \
   --target-sdk-version 35 \
-  --version-code 10 \
-  --version-name 2.1.0 \
+  --version-code 11 \
+  --version-name 2.2.0 \
   "$BUILD/compiled-resources.zip" \
   -o "$BUILD/app-unsigned.apk"
 
 javac -source 8 -target 8 -Xlint:-options \
   -classpath "$ANDROID_JAR:$WEBKIT_JAR" \
   -d "$BUILD/classes" \
-  "$ROOT/src/com/local/outlookwebfit/MainActivity.java" \
+  "$ROOT/src/com/desudesu/outlookwebfit/MainActivity.java" \
   "$ROOT/src/androidx/core/content/pm/PackageInfoCompat.java"
 
 jar cf "$BUILD/app-classes.jar" -C "$BUILD/classes" .

@@ -1,4 +1,4 @@
-package com.local.outlookwebfit;
+package com.desudesu.outlookwebfit;
 
 import android.app.Activity;
 import android.app.AlertDialog;
