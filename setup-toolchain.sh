@@ -1,21 +1,22 @@
 #!/data/data/com.termux/files/usr/bin/sh
 set -eu
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-TOOLCHAIN="$ROOT/toolchain"
-PLATFORM_ZIP="$TOOLCHAIN/platform-35_r02.zip"
-WEBKIT_DIR="$TOOLCHAIN/androidx-webkit-1.17.1"
+SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/android-sdk}"
+PLATFORM_DIR="$SDK_ROOT/platforms/android-35"
+DOWNLOAD_DIR="$SDK_ROOT/downloads"
+PLATFORM_ZIP="$DOWNLOAD_DIR/platform-35_r02.zip"
+WEBKIT_DIR="$SDK_ROOT/extras/androidx/webkit/1.17.1"
 WEBKIT_AAR="$WEBKIT_DIR/webkit.aar"
 
-mkdir -p "$TOOLCHAIN" "$WEBKIT_DIR"
+mkdir -p "$PLATFORM_DIR" "$DOWNLOAD_DIR" "$WEBKIT_DIR"
 
-if [ ! -f "$TOOLCHAIN/android.jar" ]; then
+if [ ! -f "$PLATFORM_DIR/android.jar" ]; then
   curl -fL --retry 3 \
     https://dl.google.com/android/repository/platform-35_r02.zip \
     -o "$PLATFORM_ZIP"
   printf '%s  %s\n' \
     0bb560a90a7a2cbd0dd8348224d518b638fe7949 "$PLATFORM_ZIP" | sha1sum -c -
-  unzip -p "$PLATFORM_ZIP" android-35/android.jar > "$TOOLCHAIN/android.jar"
+  unzip -p "$PLATFORM_ZIP" android-35/android.jar > "$PLATFORM_DIR/android.jar"
 fi
 
 if [ ! -f "$WEBKIT_DIR/classes.jar" ]; then
@@ -27,4 +28,4 @@ if [ ! -f "$WEBKIT_DIR/classes.jar" ]; then
   unzip -p "$WEBKIT_AAR" classes.jar > "$WEBKIT_DIR/classes.jar"
 fi
 
-printf 'Android toolchain ready in %s\n' "$TOOLCHAIN"
+printf 'Shared Android SDK ready in %s\n' "$SDK_ROOT"

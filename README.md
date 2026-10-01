@@ -50,7 +50,7 @@ Credentials are entered directly into Microsoft's pages. The app does not read, 
 
 ## Build in Termux
 
-The project intentionally uses the Android command-line tools directly and does not require Gradle or Android Studio.
+The project intentionally uses the Android command-line tools directly and does not require Gradle or Android Studio. SDK files are shared through `${ANDROID_SDK_ROOT:-$HOME/android-sdk}`, so multiple projects can reuse one installation.
 
 ```sh
 pkg install aapt2 apksigner d8 openjdk-21 curl unzip zip
@@ -76,7 +76,7 @@ AndroidManifest.xml                            App permissions and metadata
 res/drawable/ic_launcher.xml                   Vector launcher icon
 src/com/local/outlookwebfit/MainActivity.java  Browser UI and behavior
 src/androidx/.../PackageInfoCompat.java        Small AndroidX compatibility shim
-setup-toolchain.sh                             Fetches Android 35 and AndroidX WebKit
+setup-toolchain.sh                             Prepares the shared SDK if needed
 build.sh                                       Compiles, packages, and signs the APK
 ```
 

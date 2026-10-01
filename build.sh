@@ -3,15 +3,16 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 BUILD="$ROOT/build"
-ANDROID_JAR="$ROOT/toolchain/android.jar"
-WEBKIT_JAR="$ROOT/toolchain/androidx-webkit-1.17.1/classes.jar"
+SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/android-sdk}"
+ANDROID_JAR="$SDK_ROOT/platforms/android-35/android.jar"
+WEBKIT_JAR="$SDK_ROOT/extras/androidx/webkit/1.17.1/classes.jar"
 APK="$ROOT/OutlookWebFit.apk"
 KEYSTORE="${KEYSTORE_PATH:-$ROOT/outlook-web-fit.keystore}"
 KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-outlookfit}"
 KEY_ALIAS="${KEY_ALIAS:-outlookwebfit}"
 
 if [ ! -f "$ANDROID_JAR" ] || [ ! -f "$WEBKIT_JAR" ]; then
-  printf 'Missing toolchain. Run: sh setup-toolchain.sh\n' >&2
+  printf 'Missing shared Android SDK. Run: sh setup-toolchain.sh\n' >&2
   exit 1
 fi
 
