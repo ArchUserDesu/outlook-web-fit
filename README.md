@@ -30,7 +30,7 @@ Outlook Web Fit is for accounts that work in a desktop browser but cannot be use
 - Address/search field for opening other websites; non-Outlook pages retain normal desktop layout
 - File uploads, authenticated downloads, back navigation, and reload controls
 - No ads, analytics, account proxy, or custom network service
-- No JavaScript bridge exposed to loaded pages
+- Outlook-only clipboard bridge gated by a recent touch gesture
 
 ## Download
 
@@ -49,6 +49,8 @@ The app loads `https://outlook.office.com/mail/` in Android WebView with a deskt
 Each extra mailbox uses an AndroidX WebKit profile. A profile owns its cookies and web storage, allowing accounts to remain signed in simultaneously. Deleting a session also requests deletion of that profile's browser data.
 
 Credentials are entered directly into Microsoft's pages. The app does not read, store, transmit, or proxy passwords. Cookies remain in WebView's private application storage.
+
+Android WebView does not provide Outlook with the desktop Clipboard API it expects. The app supplies a narrowly scoped compatibility bridge only to HTTPS Outlook origins. Clipboard reads require a touch inside the WebView within the previous five seconds; arbitrary sites opened from the address bar cannot access the bridge.
 
 ## Build in Termux
 

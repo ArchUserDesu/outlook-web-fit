@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -11,8 +13,10 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -39,14 +43,20 @@ import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.Profile;
 import androidx.webkit.ProfileStore;
+import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class MainActivity extends Activity {
     private static final String HOME = "https://outlook.office.com/mail/";
@@ -57,6 +67,46 @@ public final class MainActivity extends Activity {
     private static final int FILE_CHOOSER = 41;
     private static final String SESSION_PREFS = "browser_sessions";
     private static final String DEFAULT_SESSION = "default";
+    private static final long CLIPBOARD_GESTURE_WINDOW_MS = 5000;
+    private static final String CLIPBOARD_SHIM =
+            "(function(){" +
+            "if(window.__outlookWebFitClipboardInstalled||!window.OutlookWebFitClipboard)return;" +
+            "window.__outlookWebFitClipboardInstalled=true;" +
+            "var pending={},nextId=0,bridge=window.OutlookWebFitClipboard;" +
+            "function error(message){try{return new DOMException(message,'NotAllowedError');}" +
+            "catch(e){return new Error(message);}}" +
+            "bridge.addEventListener('message',function(event){try{" +
+            "var response=JSON.parse(event.data),item=pending[response.id];" +
+            "if(!item)return;delete pending[response.id];clearTimeout(item.timer);" +
+            "if(response.ok)item.resolve(response);else item.reject(error(response.error||'Clipboard access failed'));" +
+            "}catch(e){}});" +
+            "function request(){return new Promise(function(resolve,reject){" +
+            "var id=String(++nextId),timer=setTimeout(function(){delete pending[id];" +
+            "reject(error('Clipboard request timed out'));},3000);" +
+            "pending[id]={resolve:resolve,reject:reject,timer:timer};" +
+            "bridge.postMessage(JSON.stringify({type:'read',id:id}));});}" +
+            "function readText(){return request().then(function(result){return result.text||'';});}" +
+            "function makeItem(result){var values={};" +
+            "values['text/plain']=new Blob([result.text||''],{type:'text/plain'});" +
+            "if(result.html)values['text/html']=new Blob([result.html],{type:'text/html'});" +
+            "if(typeof window.ClipboardItem==='function')return new ClipboardItem(values);" +
+            "return{types:Object.keys(values),getType:function(type){" +
+            "return values[type]?Promise.resolve(values[type]):Promise.reject(new Error('Type unavailable'));}};}" +
+            "function read(){return request().then(function(result){return[makeItem(result)];});}" +
+            "var clipboard=navigator.clipboard||{};" +
+            "try{Object.defineProperty(clipboard,'readText',{configurable:true,value:readText});}" +
+            "catch(e){clipboard.readText=readText;}" +
+            "try{Object.defineProperty(clipboard,'read',{configurable:true,value:read});}" +
+            "catch(e){clipboard.read=read;}" +
+            "try{Object.defineProperty(navigator,'clipboard',{configurable:true,value:clipboard});}" +
+            "catch(e){}" +
+            "if(navigator.permissions&&navigator.permissions.query){" +
+            "var originalQuery=navigator.permissions.query.bind(navigator.permissions);" +
+            "navigator.permissions.query=function(details){" +
+            "if(details&&(details.name==='clipboard-read'||details.name==='clipboard-write'))" +
+            "return Promise.resolve({state:'granted',onchange:null});" +
+            "return originalQuery(details);};}" +
+            "})();";
 
     private WebView webView;
     private ProgressBar progress;
@@ -76,6 +126,7 @@ public final class MainActivity extends Activity {
     private boolean multiProfileSupported;
     private ValueCallback<Uri[]> pendingFiles;
     private int textScale;
+    private long lastWebTouchAt;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -525,6 +576,8 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setSafeBrowsingEnabled(true);
 
+        configureClipboardBridge();
+
         CookieManager cookies = sessionCookies;
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, true);
@@ -596,6 +649,81 @@ public final class MainActivity extends Activity {
                 download(url, contentDisposition, mimeType);
             }
         });
+    }
+
+    private void configureClipboardBridge() {
+        webView.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN ||
+                    event.getActionMasked() == MotionEvent.ACTION_UP) {
+                lastWebTouchAt = SystemClock.elapsedRealtime();
+            }
+            return false;
+        });
+
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            return;
+        }
+
+        Set<String> outlookOrigins = new HashSet<>(Arrays.asList(
+                "https://outlook.office.com",
+                "https://*.outlook.office.com",
+                "https://outlook.office365.com",
+                "https://*.outlook.office365.com",
+                "https://outlook.live.com",
+                "https://*.outlook.live.com",
+                "https://outlook.cloud.microsoft",
+                "https://*.outlook.cloud.microsoft"));
+
+        WebViewCompat.addWebMessageListener(webView, "OutlookWebFitClipboard", outlookOrigins,
+                (view, message, sourceOrigin, isMainFrame, replyProxy) ->
+                        handleClipboardMessage(message, replyProxy));
+
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, CLIPBOARD_SHIM, outlookOrigins);
+        }
+    }
+
+    private void handleClipboardMessage(WebMessageCompat message,
+                                        JavaScriptReplyProxy replyProxy) {
+        JSONObject response = new JSONObject();
+        try {
+            if (message.getType() != WebMessageCompat.TYPE_STRING) {
+                return;
+            }
+            JSONObject request = new JSONObject(message.getData());
+            response.put("id", request.optString("id"));
+            if (!"read".equals(request.optString("type"))) {
+                response.put("ok", false);
+                response.put("error", "Unsupported clipboard operation");
+            } else if (SystemClock.elapsedRealtime() - lastWebTouchAt >
+                    CLIPBOARD_GESTURE_WINDOW_MS) {
+                response.put("ok", false);
+                response.put("error", "Tap Paste again to allow clipboard access");
+            } else {
+                ClipboardManager clipboard = (ClipboardManager)
+                        getSystemService(Context.CLIPBOARD_SERVICE);
+                ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
+                if (clip == null || clip.getItemCount() == 0) {
+                    response.put("ok", true);
+                    response.put("text", "");
+                } else {
+                    ClipData.Item item = clip.getItemAt(0);
+                    CharSequence text = item.coerceToText(this);
+                    response.put("ok", true);
+                    response.put("text", text == null ? "" : text.toString());
+                    String html = item.getHtmlText();
+                    if (html != null && !html.isEmpty()) response.put("html", html);
+                }
+            }
+        } catch (Exception error) {
+            try {
+                response.put("ok", false);
+                response.put("error", "Unable to read the clipboard");
+            } catch (Exception ignored) {
+                return;
+            }
+        }
+        replyProxy.postMessage(response.toString());
     }
 
     private boolean handleNavigation(Uri uri) {
