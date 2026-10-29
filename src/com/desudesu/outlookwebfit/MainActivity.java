@@ -3,17 +3,22 @@ package com.desudesu.outlookwebfit;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.Manifest;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -52,6 +57,9 @@ import androidx.webkit.WebViewFeature;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -65,6 +73,7 @@ public final class MainActivity extends Activity {
             "AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/140.0.0.0 Safari/537.36";
     private static final int FILE_CHOOSER = 41;
+    private static final int STORAGE_PERMISSION = 42;
     private static final String SESSION_PREFS = "browser_sessions";
     private static final String DEFAULT_SESSION = "default";
     private static final long CLIPBOARD_GESTURE_WINDOW_MS = 5000;
@@ -127,6 +136,9 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> pendingFiles;
     private int textScale;
     private long lastWebTouchAt;
+    private String pendingDownloadName;
+    private String pendingDownloadMime;
+    private boolean webBinaryDownloadsSupported;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -577,6 +589,7 @@ public final class MainActivity extends Activity {
         settings.setSafeBrowsingEnabled(true);
 
         configureClipboardBridge();
+        configureDownloadBridge();
 
         CookieManager cookies = sessionCookies;
         cookies.setAcceptCookie(true);
@@ -724,6 +737,46 @@ public final class MainActivity extends Activity {
             }
         }
         replyProxy.postMessage(response.toString());
+    }
+
+    private Set<String> outlookOriginRules() {
+        return new HashSet<>(Arrays.asList(
+                "https://outlook.office.com",
+                "https://*.outlook.office.com",
+                "https://outlook.office365.com",
+                "https://*.outlook.office365.com",
+                "https://outlook.live.com",
+                "https://*.outlook.live.com",
+                "https://outlook.cloud.microsoft",
+                "https://*.outlook.cloud.microsoft"));
+    }
+
+    private void configureDownloadBridge() {
+        webBinaryDownloadsSupported =
+                WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
+                WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER);
+        if (!webBinaryDownloadsSupported) return;
+
+        WebViewCompat.addWebMessageListener(webView, "OutlookWebFitDownload",
+                outlookOriginRules(),
+                (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+                    if (message.getType() == WebMessageCompat.TYPE_ARRAY_BUFFER) {
+                        byte[] bytes = message.getArrayBuffer();
+                        if (bytes == null || pendingDownloadName == null) {
+                            showDownloadError("Download data was empty");
+                            return;
+                        }
+                        String name = pendingDownloadName;
+                        String mime = pendingDownloadMime;
+                        pendingDownloadName = null;
+                        pendingDownloadMime = null;
+                        saveWebDownload(bytes, name, mime);
+                    } else if (message.getType() == WebMessageCompat.TYPE_STRING) {
+                        pendingDownloadName = null;
+                        pendingDownloadMime = null;
+                        showDownloadError("Outlook could not prepare the attachment");
+                    }
+                });
     }
 
     private boolean handleNavigation(Uri uri) {
@@ -874,8 +927,12 @@ public final class MainActivity extends Activity {
     }
 
     private void download(String url, String disposition, String mime) {
+        if (url != null && (url.startsWith("blob:") || url.startsWith("data:"))) {
+            startWebDownload(url, disposition, mime);
+            return;
+        }
         if (url == null || !(url.startsWith("https://") || url.startsWith("http://"))) {
-            Toast.makeText(this, "This type of download is not supported", Toast.LENGTH_LONG).show();
+            showDownloadError("This type of download is not supported");
             return;
         }
         try {
@@ -897,6 +954,110 @@ public final class MainActivity extends Activity {
         } catch (Exception e) {
             Toast.makeText(this, "Download could not be started", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void startWebDownload(String url, String disposition, String mime) {
+        if (!webBinaryDownloadsSupported || !isOutlookUrl(webView.getUrl())) {
+            showDownloadError("This WebView cannot save browser-generated files");
+            return;
+        }
+        if (Build.VERSION.SDK_INT <= 28 &&
+                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+                        PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    STORAGE_PERMISSION);
+            Toast.makeText(this, "Allow storage access, then tap Download again",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        pendingDownloadName = safeDownloadName(
+                URLUtil.guessFileName(url, disposition, mime), mime);
+        pendingDownloadMime = mime == null || mime.isEmpty()
+                ? "application/octet-stream" : mime;
+
+        String script = "(function(){fetch(" + JSONObject.quote(url) + ")" +
+                ".then(function(response){if(!response.ok)throw new Error('HTTP '+response.status);" +
+                "return response.arrayBuffer();})" +
+                ".then(function(bytes){OutlookWebFitDownload.postMessage(bytes);})" +
+                ".catch(function(error){OutlookWebFitDownload.postMessage('error:'+String(error));});" +
+                "})();";
+        webView.evaluateJavascript(script, null);
+        Toast.makeText(this, "Preparing " + pendingDownloadName, Toast.LENGTH_SHORT).show();
+    }
+
+    private String safeDownloadName(String name, String mime) {
+        String result = name == null || name.trim().isEmpty() ? "Outlook attachment" : name;
+        result = result.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        if (result.isEmpty()) result = "Outlook attachment";
+        if ("application/pdf".equalsIgnoreCase(mime) &&
+                !result.toLowerCase(java.util.Locale.US).endsWith(".pdf")) {
+            result += ".pdf";
+        }
+        return result;
+    }
+
+    private void saveWebDownload(byte[] bytes, String name, String mime) {
+        new Thread(() -> {
+            Uri target = null;
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                    values.put(MediaStore.Downloads.MIME_TYPE, mime);
+                    values.put(MediaStore.Downloads.RELATIVE_PATH,
+                            Environment.DIRECTORY_DOWNLOADS);
+                    values.put(MediaStore.Downloads.IS_PENDING, 1);
+                    target = getContentResolver().insert(
+                            MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (target == null) throw new IllegalStateException("No Downloads provider");
+                    try (OutputStream output = getContentResolver().openOutputStream(target)) {
+                        if (output == null) throw new IllegalStateException("Cannot open download");
+                        output.write(bytes);
+                    }
+                    values.clear();
+                    values.put(MediaStore.Downloads.IS_PENDING, 0);
+                    getContentResolver().update(target, values, null, null);
+                } else {
+                    File directory = Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS);
+                    if (!directory.exists() && !directory.mkdirs()) {
+                        throw new IllegalStateException("Cannot create Downloads directory");
+                    }
+                    File targetFile = uniqueFile(directory, name);
+                    try (OutputStream output = new FileOutputStream(targetFile)) {
+                        output.write(bytes);
+                    }
+                }
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "Saved " + name + " to Downloads", Toast.LENGTH_LONG).show());
+            } catch (Exception error) {
+                if (target != null) {
+                    try {
+                        getContentResolver().delete(target, null, null);
+                    } catch (Exception ignored) {
+                    }
+                }
+                runOnUiThread(() -> showDownloadError("Attachment could not be saved"));
+            }
+        }, "OutlookDownloadWriter").start();
+    }
+
+    private File uniqueFile(File directory, String name) {
+        File candidate = new File(directory, name);
+        if (!candidate.exists()) return candidate;
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String extension = dot > 0 ? name.substring(dot) : "";
+        int number = 2;
+        while (candidate.exists()) {
+            candidate = new File(directory, base + " (" + number++ + ")" + extension);
+        }
+        return candidate;
+    }
+
+    private void showDownloadError(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
     @Override

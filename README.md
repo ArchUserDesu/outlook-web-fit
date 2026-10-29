@@ -28,7 +28,7 @@ Outlook Web Fit is for accounts that work in a desktop browser but cannot be use
 - Adjustable Outlook text scale from 80% to 180%
 - Full-screen interface with controls positioned around display cutouts
 - Address/search field for opening other websites; non-Outlook pages retain normal desktop layout
-- File uploads, authenticated downloads, back navigation, and reload controls
+- File uploads, authenticated downloads, and Outlook-generated PDF/blob downloads
 - No ads, analytics, account proxy, or custom network service
 - Outlook-only clipboard bridge gated by a recent touch gesture
 

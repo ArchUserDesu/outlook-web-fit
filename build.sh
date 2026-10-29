@@ -28,8 +28,8 @@ aapt2 link \
   --manifest "$ROOT/AndroidManifest.xml" \
   --min-sdk-version 23 \
   --target-sdk-version 35 \
-  --version-code 12 \
-  --version-name 2.2.1 \
+  --version-code 13 \
+  --version-name 2.2.2 \
   "$BUILD/compiled-resources.zip" \
   -o "$BUILD/app-unsigned.apk"
 
